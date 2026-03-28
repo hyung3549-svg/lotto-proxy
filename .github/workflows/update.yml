@@ -8,36 +8,19 @@ on:
 jobs:
   update-lotto-data:
     runs-on: ubuntu-latest
-
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-
       - name: Python 설치
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
       - name: 로또 데이터 크롤링
         run: python scripts/crawl.py
-
-      - name: 변경사항 커밋 & 푸시
+      - name: 커밋 및 푸시
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add lotto.json
-          git diff --staged --quiet || git commit -m "🎰 로또 데이터 자동 업데이트 $(date '+%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "lotto update"
           git push
-```
-
-**⑤ `Commit changes` 클릭**
-
----
-
-## 2번 파일: crawl.py
-
-**① 다시 `Add file` → `Create new file` 클릭**
-
-**② 파일명 입력란에:**
-```
-scripts/crawl.py
