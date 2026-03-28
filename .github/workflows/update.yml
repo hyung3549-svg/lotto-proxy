@@ -14,9 +14,4 @@ jobs:
       - name: crawl
         run: python scripts/crawl.py
       - name: commit
-        run: |
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add lotto.json
-          git diff --staged --quiet || git commit -m "update"
-          git push
+        run: git config user.email "action@github.com" && git config user.name "GitHub Action" && git add lotto.json && git commit -m "update" --allow-empty && git push
