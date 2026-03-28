@@ -2,7 +2,7 @@ name: Update Lotto Data
 
 on:
   schedule:
-    - cron: '47 11 * * 6'
+    - cron: '35 11 * * 6'
   workflow_dispatch:
 
 permissions:
@@ -11,6 +11,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
