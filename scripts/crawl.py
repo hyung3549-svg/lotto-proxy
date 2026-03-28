@@ -1,57 +1,86 @@
 import urllib.request
+import urllib.parse
 import json
 import re
 import os
-import time
 
-def fetch_page(pg):
-    url = f"https://superkts.com/lotto/list/?pg={pg}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+def fetch_page(page):
+    url = "https://www.lotto.co.kr/lotto_info/list_ajax"
+    data = urllib.parse.urlencode({
+        "category": "AC01",
+        "startPos": str((page-1)*10+1),
+        "endPos": str(page*10),
+        "pageSize": "10",
+        "total": "1217",
+        "page": str(page),
+        "code_type_id": "2"
+    }).encode()
+    req = urllib.request.Request(url, data=data, headers={
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.lotto.co.kr/article/list/AC01"
+    })
     try:
-        html = urllib.request.urlopen(req, timeout=10).read().decode("utf-8", errors="ignore")
-        return html
+        return urllib.request.urlopen(req, timeout=10).read().decode("utf-8", errors="ignore")
     except:
         return None
 
-def parse_html(html):
-    rows = re.findall(
-        r'<tr><td>(\d+)</td><td><span[^>]+>(\d+)</span></td><td><span[^>]+>(\d+)</span></td><td><span[^>]+>(\d+)</span></td><td><span[^>]+>(\d+)</span></td><td><span[^>]+>(\d+)</span></td><td><span[^>]+>(\d+)</span></td><td><span[^>]+>(\d+)</span></td>',
-        html
-    )
-    results = []
-    for r in rows:
-        nums = sorted([int(r[1]),int(r[2]),int(r[3]),int(r[4]),int(r[5]),int(r[6])])
-        results.append({"round": int(r[0]), "nums": nums, "bonus": int(r[7])})
-    return results
+def get_total():
+    url = "https://www.lotto.co.kr/lotto_info/list_cnt_ajax"
+    data = urllib.parse.urlencode({"category": "AC01", "code_type_id": "2"}).encode()
+    req = urllib.request.Request(url, data=data, headers={
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.lotto.co.kr/article/list/AC01"
+    })
+    try:
+        res = urllib.request.urlopen(req, timeout=10).read().decode("utf-8")
+        return json.loads(res)["count"]
+    except:
+        return 0
 
 def main():
     if os.path.exists("lotto.json"):
         with open("lotto.json", "r", encoding="utf-8") as f:
             existing = json.load(f)
         existing_rounds = {d["round"] for d in existing}
-        print(f"기존 데이터: {len(existing)}회차")
+        latest_round = max(existing_rounds)
+        print(f"기존 데이터: {len(existing)}회차 (최신: {latest_round}회)")
     else:
         existing = []
         existing_rounds = set()
-        print("새로 시작")
+        latest_round = 0
 
-    print("최신 회차 확인 중...")
+    total = get_total()
+    print(f"전체 회차: {total}")
+
+    if total <= latest_round:
+        print("새로운 데이터 없음")
+        return
+
     new_data = []
-
-    for pg in range(1, 4):
-        html = fetch_page(pg)
-        if not html:
-            print(f"페이지 {pg} 실패")
-            continue
-        rows = parse_html(html)
-        for row in rows:
-            if row["round"] not in existing_rounds:
-                new_data.append(row)
-                print(f"새 데이터: {row['round']}회 {row['nums']} 보너스 {row['bonus']}")
-        time.sleep(0.5)
+    html = fetch_page(1)
+    if html:
+        rounds = re.findall(r'data-options="(\d+)"', html)
+        balls = re.findall(r'lottoball_92/on/(\d+)\.png', html)
+        bonus = re.findall(r'lottoball_92/bonus/(\d+)\.png', html)
+        dates = re.findall(r'<span>(\d{4}-\d{2}-\d{2})</span>', html)
+        for i, r in enumerate(rounds):
+            if int(r) in existing_rounds:
+                continue
+            start = i * 6
+            if start+6 <= len(balls) and i < len(bonus):
+                nums = sorted([int(balls[start+j]) for j in range(6)])
+                new_data.append({
+                    "round": int(r),
+                    "date": dates[i] if i < len(dates) else "",
+                    "nums": nums,
+                    "bonus": int(bonus[i])
+                })
+                print(f"새 데이터: {r}회 {nums} 보너스 {bonus[i]}")
 
     if not new_data:
-        print("새로운 데이터 없음 (이미 최신 상태)")
+        print("새로운 데이터 없음")
         return
 
     all_data = existing + new_data
@@ -61,7 +90,7 @@ def main():
     with open("lotto.json", "w", encoding="utf-8") as f:
         json.dump(all_data, f, ensure_ascii=False, indent=2)
 
-    print(f"완료! 총 {len(all_data)}회차 저장 (신규 {len(new_data)}개 추가)")
+    print(f"완료! 총 {len(all_data)}회차 (신규 {len(new_data)}개 추가)")
 
 if __name__ == "__main__":
     main()
