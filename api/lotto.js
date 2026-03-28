@@ -1,55 +1,72 @@
 import https from 'https';
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
-
-  const { round } = req.query;
-  if (!round) return res.status(400).json({ error: 'round 파라미터 필요' });
-
-  const data = await new Promise((resolve, reject) => {
+function httpGet(url, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirectCount > 5) return reject(new Error('Too many redirects'));
+    
+    const urlObj = new URL(url);
     const options = {
-      hostname: 'www.dhlottery.co.kr',
-      path: `/common.do?method=getLottoNumber&drwNo=${round}`,
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
       method: 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8',
+        'Accept-Language': 'ko-KR,ko;q=0.9',
         'X-Requested-With': 'XMLHttpRequest',
-        'Referer': 'https://www.dhlottery.co.kr/gameInfo.do?method=lotteryGame',
-        'Cookie': 'WMONID=test; JSESSIONID=test',
+        'Referer': 'https://www.dhlottery.co.kr/',
       },
     };
 
-    const request = https.request(options, (response) => {
+    const req = https.request(options, (res) => {
+      // 리다이렉트 처리
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        const next = res.headers.location.startsWith('http')
+          ? res.headers.location
+          : `https://${urlObj.hostname}${res.headers.location}`;
+        return resolve(httpGet(next, redirectCount + 1));
+      }
       let body = '';
-      response.on('data', chunk => body += chunk);
-      response.on('end', () => resolve({ status: response.statusCode, body }));
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => resolve({ status: res.statusCode, body }));
     });
 
-    request.on('error', reject);
-    request.setTimeout(10000, () => {
-      request.destroy();
-      reject(new Error('timeout'));
-    });
-    request.end();
+    req.on('error', reject);
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.end();
   });
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const { round } = req.query;
+  if (!round) return res.status(400).json({ error: 'round 필요' });
 
   try {
-    if (data.body.trim().startsWith('{')) {
-      const json = JSON.parse(data.body);
+    const result = await httpGet(
+      `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${round}`
+    );
+
+    if (result.body.trim().startsWith('{')) {
+      const json = JSON.parse(result.body);
       if (json.returnValue === 'success') {
         return res.status(200).json(json);
       }
     }
+
     return res.status(502).json({
       error: 'HTML 응답',
-      preview: data.body.substring(0, 200)
+      preview: result.body.substring(0, 200)
     });
+
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
 }
+```
+
+Commit 후 확인해주세요!
+```
+https://lotto-proxy-36il.vercel.app/api/lotto?round=1150
