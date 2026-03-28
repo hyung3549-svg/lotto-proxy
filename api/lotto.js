@@ -8,37 +8,25 @@ export default async function handler(req, res) {
   if (!round) return res.status(400).json({ error: 'round 파라미터 필요' });
 
   try {
-    const response = await fetch(
-      `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${round}`,
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'Accept-Language': 'ko-KR,ko;q=0.9',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Referer': 'https://www.dhlottery.co.kr/gameInfo.do?method=lotteryGame&wiselog=H_C_1_1',
-          'Connection': 'keep-alive',
-        },
-      }
+    // GitHub raw 데이터 - 동행복권 전체 당첨번호 JSON
+    const res2 = await fetch(
+      `https://raw.githubusercontent.com/raben2/lotto/master/lotto.json`
     );
-
-    const text = await response.text();
-
-    if (text.trim().startsWith('{')) {
-      const data = JSON.parse(text);
-      if (data.returnValue === 'success') {
-        return res.status(200).json(data);
-      }
+    const all = await res2.json();
+    
+    // 회차 찾기
+    const item = all.find(d => d.drwNo === Number(round));
+    if (item) {
+      return res.status(200).json({ ...item, returnValue: 'success' });
     }
-
-    // 로그 확인용
-    return res.status(502).json({
-      error: 'HTML 응답',
-      status: response.status,
-      preview: text.substring(0, 300),
-    });
+    return res.status(404).json({ error: '해당 회차 없음' });
 
   } catch (e) {
-    return res.status(500).json({ error: e.message, stack: e.stack });
+    return res.status(500).json({ error: e.message });
   }
 }
+```
+
+Commit 후 확인해주세요!
+```
+https://lotto-proxy-36il.vercel.app/api/lotto?round=1150
