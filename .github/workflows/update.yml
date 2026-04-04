@@ -19,64 +19,59 @@ jobs:
         run: |
           pip install requests -q
           python3 << 'EOF'
-          import json, requests, urllib.parse
+          import json, requests
 
-          with open('lotto.json', 'r') as f:
+          session = requests.Session()
+          session.headers.update({
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept-Language': 'ko,en-US;q=0.9,en;q=0.8',
+              'Origin': 'https://www.dhlottery.co.kr',
+              'Referer': 'https://www.dhlottery.co.kr/',
+              'Connection': 'keep-alive',
+          })
+
+          # 메인페이지 방문해서 WMONID 쿠키 획득
+          print('세션 초기화 중...')
+          session.get('https://www.dhlottery.co.kr/common.do?method=main', timeout=15)
+          print(f'쿠키: {dict(session.cookies)}')
+
+          with open('lotto.json', 'r', encoding='utf-8') as f:
               data = json.load(f)
 
           latest = max(d['round'] for d in data)
           new_rounds = []
 
-          def fetch_round(r):
-              target = f'https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={r}'
-              enc = urllib.parse.quote(target, safe='')
-              proxies = [
-                  ('corsproxy',  f'https://corsproxy.io/?{enc}'),
-                  ('codetabs',   f'https://api.codetabs.com/v1/proxy?quest={enc}'),
-                  ('allorigins', f'https://api.allorigins.win/get?url={enc}'),
-              ]
-              for name, url in proxies:
-                  try:
-                      resp = requests.get(url, timeout=15)
-                      if name == 'allorigins':
-                          content = resp.json().get('contents', '').strip()
-                      else:
-                          content = resp.text.strip()
-                      print(f'  [{name}] 응답 앞 80자: {content[:80]}')
-                      if not content.startswith('{'):
-                          continue
-                      d = json.loads(content)
-                      if d.get('returnValue') == 'success':
-                          print(f'  [{name}] ✅ 성공')
-                          return d
-                      print(f'  [{name}] returnValue={d.get("returnValue")}')
-                  except Exception as e:
-                      print(f'  [{name}] 실패: {e}')
-              return None
-
           for r in range(latest + 1, latest + 10):
-              print(f'\n{r}회차 시도...')
-              d = fetch_round(r)
-              if not d:
-                  print(f'ℹ️ {r}회차: 모든 프록시 실패')
+              try:
+                  resp = session.get(
+                      f'https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={r}',
+                      timeout=15
+                  )
+                  content = resp.text.strip()
+                  print(f'{r}회차 응답: {content[:80]}')
+                  if not content.startswith('{'):
+                      break
+                  d = resp.json()
+                  if d.get('returnValue') != 'success':
+                      print(f'ℹ️ {r}회차 없음')
+                      break
+                  new_rounds.append({
+                      'round': d['drwNo'], 'date': d['drwNoDate'],
+                      'nums': sorted([d['drwtNo1'],d['drwtNo2'],d['drwtNo3'],d['drwtNo4'],d['drwtNo5'],d['drwtNo6']]),
+                      'bonus': d['bnusNo'], 'prize1': d['firstWinamnt'], 'prize1Cnt': d['firstPrzwnerCo'],
+                  })
+                  print(f'✅ {r}회차 추가')
+              except Exception as e:
+                  print(f'❌ {r}회차 실패: {e}')
                   break
-              new_rounds.append({
-                  'round': d['drwNo'],
-                  'date': d['drwNoDate'],
-                  'nums': sorted([d['drwtNo1'],d['drwtNo2'],d['drwtNo3'],d['drwtNo4'],d['drwtNo5'],d['drwtNo6']]),
-                  'bonus': d['bnusNo'],
-                  'prize1': d['firstWinamnt'],
-                  'prize1Cnt': d['firstPrzwnerCo'],
-              })
-              print(f'✅ {r}회차 추가')
 
           if new_rounds:
               data = new_rounds + data
               with open('lotto.json', 'w', encoding='utf-8') as f:
                   json.dump(data, f, ensure_ascii=False)
-              print(f'\n{len(new_rounds)}개 업데이트 완료')
+              print(f'{len(new_rounds)}개 업데이트 완료')
           else:
-              print('\n새 회차 없음')
+              print('새 회차 없음')
           EOF
 
       - name: Commit and push
