@@ -2,27 +2,62 @@ name: Update Lotto Data
 
 on:
   schedule:
-    - cron: '35 11 * * 6'
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    - cron: '0 13 * * 6'  # 매주 토요일 22시 KST (13:00 UTC)
+  workflow_dispatch:        # 수동 실행 버튼도 활성화
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      - name: crawl
-        run: python scripts/crawl.py
-      - name: commit
+
+      - name: Fetch latest lotto rounds
         run: |
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
+          python3 << 'EOF'
+          import json, urllib.request
+
+          with open('lotto.json', 'r') as f:
+              data = json.load(f)
+
+          latest = max(d['round'] for d in data)
+          new_rounds = []
+
+          for r in range(latest + 1, latest + 10):
+              url = f'https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={r}'
+              try:
+                  req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                  with urllib.request.urlopen(req, timeout=10) as res:
+                      d = json.loads(res.read())
+                  if d.get('returnValue') != 'success':
+                      break
+                  new_rounds.append({
+                      'round': d['drwNo'],
+                      'date': d['drwNoDate'],
+                      'nums': sorted([d['drwtNo1'],d['drwtNo2'],d['drwtNo3'],d['drwtNo4'],d['drwtNo5'],d['drwtNo6']]),
+                      'bonus': d['bnusNo'],
+                      'prize1': d['firstWinamnt'],
+                      'prize1Cnt': d['firstPrzwnerCo'],
+                  })
+                  print(f'✅ {r}회차 추가')
+              except Exception as e:
+                  print(f'❌ {r}회차 실패: {e}')
+                  break
+
+          if new_rounds:
+              data = new_rounds + data
+              with open('lotto.json', 'w', encoding='utf-8') as f:
+                  json.dump(data, f, ensure_ascii=False)
+              print(f'{len(new_rounds)}개 회차 업데이트 완료')
+          else:
+              print('새 회차 없음')
+          EOF
+
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add lotto.json
-          git diff --staged --quiet || git commit -m "update"
+          git diff --staged --quiet || git commit -m "chore: auto-update lotto data"
           git push
