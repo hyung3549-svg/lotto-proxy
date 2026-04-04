@@ -27,31 +27,44 @@ jobs:
           latest = max(d['round'] for d in data)
           new_rounds = []
 
-          for r in range(latest + 1, latest + 10):
+          def fetch_round(r):
               target = f'https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={r}'
-              proxy_url = f'https://api.allorigins.win/get?url={urllib.parse.quote(target)}'
-              try:
-                  resp = requests.get(proxy_url, timeout=20)
-                  content = resp.json().get('contents', '').strip()
-                  if not content.startswith('{'):
-                      print(f'ℹ️ {r}회차: 아직 발표 안 됨')
-                      break
-                  d = json.loads(content)
-                  if d.get('returnValue') != 'success':
-                      print(f'ℹ️ {r}회차: 없음')
-                      break
-                  new_rounds.append({
-                      'round': d['drwNo'],
-                      'date': d['drwNoDate'],
-                      'nums': sorted([d['drwtNo1'],d['drwtNo2'],d['drwtNo3'],d['drwtNo4'],d['drwtNo5'],d['drwtNo6']]),
-                      'bonus': d['bnusNo'],
-                      'prize1': d['firstWinamnt'],
-                      'prize1Cnt': d['firstPrzwnerCo'],
-                  })
-                  print(f'✅ {r}회차 추가')
-              except Exception as e:
-                  print(f'❌ {r}회차 실패: {e}')
+              proxies = [
+                  ('corsproxy',  f'https://corsproxy.io/?{urllib.parse.quote(target)}'),
+                  ('allorigins', f'https://api.allorigins.win/get?url={urllib.parse.quote(target)}'),
+                  ('codetabs',   f'https://api.codetabs.com/v1/proxy?quest={target}'),
+              ]
+              for name, url in proxies:
+                  try:
+                      resp = requests.get(url, timeout=15)
+                      content = resp.json().get('contents', '').strip() if name == 'allorigins' else resp.text.strip()
+                      if not content.startswith('{'):
+                          print(f'  [{name}] HTML 응답')
+                          continue
+                      d = json.loads(content)
+                      if d.get('returnValue') == 'success':
+                          print(f'  [{name}] 성공')
+                          return d
+                      print(f'  [{name}] returnValue 없음')
+                  except Exception as e:
+                      print(f'  [{name}] 실패: {e}')
+              return None
+
+          for r in range(latest + 1, latest + 10):
+              print(f'{r}회차 시도...')
+              d = fetch_round(r)
+              if not d:
+                  print(f'ℹ️ {r}회차: 접근 불가 또는 미발표')
                   break
+              new_rounds.append({
+                  'round': d['drwNo'],
+                  'date': d['drwNoDate'],
+                  'nums': sorted([d['drwtNo1'],d['drwtNo2'],d['drwtNo3'],d['drwtNo4'],d['drwtNo5'],d['drwtNo6']]),
+                  'bonus': d['bnusNo'],
+                  'prize1': d['firstWinamnt'],
+                  'prize1Cnt': d['firstPrzwnerCo'],
+              })
+              print(f'✅ {r}회차 추가')
 
           if new_rounds:
               data = new_rounds + data
