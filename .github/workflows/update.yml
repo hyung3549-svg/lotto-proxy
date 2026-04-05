@@ -10,9 +10,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml -q
-      - name: Fetch latest lotto rounds
+      - name: Fetch and update
         run: python3 scripts/crawl.py
       - name: Commit and push
         run: |
