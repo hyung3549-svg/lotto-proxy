@@ -5,18 +5,29 @@ const OWNER = "hyung3549-svg";
 const REPO = "lotto-proxy";
 
 async function fetchRound(rnd) {
-  const url = `https://dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${rnd}`;
+  const url = `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${rnd}`;
+  console.log(`API 호출: ${url}`);
   const res = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      "Accept": "application/json, text/javascript, */*",
-      "Referer": "https://dhlottery.co.kr/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/javascript, */*; q=0.01",
+      "Accept-Language": "ko-KR,ko;q=0.9",
+      "Referer": "https://www.dhlottery.co.kr/gameResult.do?method=byWin",
+      "X-Requested-With": "XMLHttpRequest",
     },
   });
+  console.log(`응답 status: ${res.status}`);
   const text = await res.text();
-  if (!text.startsWith("{")) return null;
+  console.log(`응답 앞 200자: ${text.substring(0, 200)}`);
+  if (!text.trim().startsWith("{")) {
+    console.log("JSON 아님 - 차단됨");
+    return null;
+  }
   const data = JSON.parse(text);
-  if (data.returnValue !== "success") return null;
+  if (data.returnValue !== "success") {
+    console.log(`returnValue: ${data.returnValue}`);
+    return null;
+  }
   return {
     round: data.drwNo,
     date: data.drwNoDate,
@@ -28,14 +39,24 @@ async function fetchRound(rnd) {
 }
 
 async function getLatestRound() {
-  const res = await fetch("https://dhlottery.co.kr/common.do?method=main", {
+  const url = "https://www.dhlottery.co.kr/common.do?method=main";
+  console.log(`메인 호출: ${url}`);
+  const res = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept-Language": "ko-KR,ko;q=0.9",
     },
   });
+  console.log(`메인 status: ${res.status}`);
   const html = await res.text();
+  console.log(`메인 앞 500자: ${html.substring(0, 500)}`);
   const m = html.match(/<strong id="lottoDrwNo">(\d+)<\/strong>/);
-  return m ? parseInt(m[1]) : null;
+  if (m) {
+    console.log(`최신 회차: ${m[1]}`);
+    return parseInt(m[1]);
+  }
+  console.log("회차 파싱 실패");
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -47,7 +68,6 @@ export default async function handler(req, res) {
     });
     const existing = JSON.parse(Buffer.from(fileData.content, "base64").toString());
     const latestExisting = Math.max(...existing.map((d) => d.round));
-
     console.log(`기존 최신: ${latestExisting}회`);
 
     const latestRound = await getLatestRound();
@@ -55,22 +75,18 @@ export default async function handler(req, res) {
       return res.json({ message: "새 데이터 없음", latestRound, latestExisting });
     }
 
-    console.log(`새 회차 발견: ${latestRound}회`);
-
     const newRounds = [];
     for (let rnd = latestExisting + 1; rnd <= latestRound; rnd++) {
       const result = await fetchRound(rnd);
       if (result) {
         newRounds.push(result);
-        console.log(`✅ ${rnd}회 ${result.date} ${result.nums}`);
-      } else {
-        console.log(`❌ ${rnd}회 실패`);
+        console.log(`✅ ${rnd}회 추가`);
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
 
     if (newRounds.length === 0) {
-      return res.json({ message: "수집 실패" });
+      return res.json({ message: "수집 실패", latestRound });
     }
 
     const allData = [...newRounds, ...existing];
