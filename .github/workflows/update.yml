@@ -16,25 +16,51 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Fetch latest lotto rounds
+        env:
+          LOTTO_ID: ${{ secrets.LOTTO_ID }}
+          LOTTO_PW: ${{ secrets.LOTTO_PW }}
         run: |
-          pip install requests -q
+          pip install requests rsa -q
           python3 << 'EOF'
-          import json, requests
+          import json, requests, rsa, base64, os
+
+          USER_ID = os.environ['LOTTO_ID']
+          USER_PW = os.environ['LOTTO_PW']
 
           session = requests.Session()
           session.headers.update({
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept-Language': 'ko,en-US;q=0.9,en;q=0.8',
+              'Accept-Language': 'ko,en-US;q=0.9',
               'Origin': 'https://www.dhlottery.co.kr',
               'Referer': 'https://www.dhlottery.co.kr/',
-              'Connection': 'keep-alive',
           })
 
-          # 메인페이지 방문해서 WMONID 쿠키 획득
-          print('세션 초기화 중...')
+          # 1) 메인페이지 → WMONID 획득
           session.get('https://www.dhlottery.co.kr/common.do?method=main', timeout=15)
-          print(f'쿠키: {dict(session.cookies)}')
 
+          # 2) RSA 공개키 획득
+          key_resp = session.post(
+              'https://www.dhlottery.co.kr/userSsl.do?method=getPublicKey',
+              timeout=15
+          ).json()
+          pub_key = rsa.PublicKey(int(key_resp['modulus'], 16), int(key_resp['exponent'], 16))
+
+          # 3) RSA 암호화 로그인
+          enc_id = base64.b64encode(rsa.encrypt(USER_ID.encode(), pub_key)).decode()
+          enc_pw = base64.b64encode(rsa.encrypt(USER_PW.encode(), pub_key)).decode()
+
+          login_resp = session.post(
+              'https://www.dhlottery.co.kr/userSsl.do?method=login',
+              data={'encryptUserId': enc_id, 'encryptUserPw': enc_pw, 'userId': '', 'password': '', 'checkSave': 'on', 'returnUrl': ''},
+              timeout=15
+          )
+
+          if 'JSESSIONID' not in session.cookies and 'jsessionid' not in [c.lower() for c in session.cookies]:
+              print('❌ 로그인 실패')
+              exit(1)
+          print('✅ 로그인 성공')
+
+          # 4) 최신 회차 수집
           with open('lotto.json', 'r', encoding='utf-8') as f:
               data = json.load(f)
 
@@ -42,28 +68,23 @@ jobs:
           new_rounds = []
 
           for r in range(latest + 1, latest + 10):
-              try:
-                  resp = session.get(
-                      f'https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={r}',
-                      timeout=15
-                  )
-                  content = resp.text.strip()
-                  print(f'{r}회차 응답: {content[:80]}')
-                  if not content.startswith('{'):
-                      break
-                  d = resp.json()
-                  if d.get('returnValue') != 'success':
-                      print(f'ℹ️ {r}회차 없음')
-                      break
-                  new_rounds.append({
-                      'round': d['drwNo'], 'date': d['drwNoDate'],
-                      'nums': sorted([d['drwtNo1'],d['drwtNo2'],d['drwtNo3'],d['drwtNo4'],d['drwtNo5'],d['drwtNo6']]),
-                      'bonus': d['bnusNo'], 'prize1': d['firstWinamnt'], 'prize1Cnt': d['firstPrzwnerCo'],
-                  })
-                  print(f'✅ {r}회차 추가')
-              except Exception as e:
-                  print(f'❌ {r}회차 실패: {e}')
+              resp = session.get(
+                  f'https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={r}',
+                  timeout=15
+              )
+              content = resp.text.strip()
+              if not content.startswith('{'):
+                  print(f'ℹ️ {r}회차 없음')
                   break
+              d = resp.json()
+              if d.get('returnValue') != 'success':
+                  break
+              new_rounds.append({
+                  'round': d['drwNo'], 'date': d['drwNoDate'],
+                  'nums': sorted([d['drwtNo1'],d['drwtNo2'],d['drwtNo3'],d['drwtNo4'],d['drwtNo5'],d['drwtNo6']]),
+                  'bonus': d['bnusNo'], 'prize1': d['firstWinamnt'], 'prize1Cnt': d['firstPrzwnerCo'],
+              })
+              print(f'✅ {r}회차 추가')
 
           if new_rounds:
               data = new_rounds + data
