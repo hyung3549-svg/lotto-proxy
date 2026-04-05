@@ -3,6 +3,7 @@ import json
 import re
 import os
 import time
+from datetime import datetime
 
 def fetch_round(rnd):
     url = f"https://pyony.com/lotto/rounds/{rnd}/"
@@ -17,16 +18,20 @@ def fetch_round(rnd):
             return None
         html = res.read().decode("utf-8", errors="ignore")
 
-        # 번호: <div class="d-inline-block numberCircle ..."><strong>숫자</strong></div>
         nums = [int(m.group(1)) for m in re.finditer(
             r'class="[^"]*numberCircle[^"]*"[^>]*>\s*<strong>(\d+)</strong>', html
         )]
 
-        # 날짜
         date_m = re.search(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', html)
         date = f"{date_m.group(1)}-{int(date_m.group(2)):02d}-{int(date_m.group(3)):02d}" if date_m else ""
 
-        # 1등 당첨금
+        # 날짜가 오늘 이후면 아직 미발표 — 저장 안 함
+        if date:
+            draw_date = datetime.strptime(date, "%Y-%m-%d")
+            if draw_date.date() > datetime.today().date():
+                print(f"  {rnd}회 미래 날짜({date}) - 미발표, 스킵")
+                return None
+
         prize_m = re.search(r'1등</th>\s*<td[^>]*>(\d+)</td>\s*<td[^>]*><a[^>]*>([0-9,]+)</a>', html)
         prize1 = int(prize_m.group(2).replace(',', '')) if prize_m else 0
         prize1Cnt = int(prize_m.group(1)) if prize_m else 0
@@ -60,7 +65,7 @@ def main():
         print(f"{rnd}회차 시도...")
         result = fetch_round(rnd)
         if not result:
-            print(f"{rnd}회 없음 - 종료")
+            print(f"{rnd}회 없음 또는 미발표 - 종료")
             break
         new_rounds.append(result)
         print(f"✅ {rnd}회 {result['date']} {result['nums']} 보너스:{result['bonus']}")
