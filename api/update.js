@@ -1,6 +1,7 @@
 import { Octokit } from "@octokit/rest";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+console.log(`토큰 확인: ${GITHUB_TOKEN ? GITHUB_TOKEN.substring(0,10) + '...' : '없음'}`);
 const OWNER = "hyung3549-svg";
 const REPO = "lotto-proxy";
 
