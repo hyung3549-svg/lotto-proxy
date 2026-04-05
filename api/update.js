@@ -39,16 +39,9 @@ async function getLatestRound() {
 }
 
 export default async function handler(req, res) {
-  // Vercel Cron 인증
-  const authHeader = req.headers["authorization"];
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
   try {
     const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-    // 현재 lotto.json 가져오기
     const { data: fileData } = await octokit.repos.getContent({
       owner: OWNER, repo: REPO, path: "lotto.json",
     });
@@ -57,7 +50,6 @@ export default async function handler(req, res) {
 
     console.log(`기존 최신: ${latestExisting}회`);
 
-    // 최신 회차 확인
     const latestRound = await getLatestRound();
     if (!latestRound || latestRound <= latestExisting) {
       return res.json({ message: "새 데이터 없음", latestRound, latestExisting });
@@ -65,7 +57,6 @@ export default async function handler(req, res) {
 
     console.log(`새 회차 발견: ${latestRound}회`);
 
-    // 새 회차 수집
     const newRounds = [];
     for (let rnd = latestExisting + 1; rnd <= latestRound; rnd++) {
       const result = await fetchRound(rnd);
@@ -82,7 +73,6 @@ export default async function handler(req, res) {
       return res.json({ message: "수집 실패" });
     }
 
-    // GitHub에 push
     const allData = [...newRounds, ...existing];
     const content = Buffer.from(JSON.stringify(allData, null, 2)).toString("base64");
 
