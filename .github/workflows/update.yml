@@ -10,8 +10,98 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 lxml -q
       - name: Fetch latest lotto rounds
-        run: python3 scripts/crawl.py
+        run: |
+          python3 - <<'PYEOF'
+          import requests, json, re, time, os
+          from bs4 import BeautifulSoup
+          from datetime import datetime
+
+          s = requests.Session()
+          s.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept-Language': 'ko-KR,ko;q=0.9',
+          })
+
+          def get_latest_round():
+            try:
+              html = s.get('https://dhlottery.co.kr/common.do?method=main', timeout=15).text
+              soup = BeautifulSoup(html, 'lxml')
+              el = soup.find('strong', id='lottoDrwNo')
+              if el: return int(el.text.strip())
+            except Exception as e:
+              print(f'최신 회차 조회 실패: {e}')
+            return None
+
+          def fetch_round(rnd):
+            try:
+              html = s.get(f'https://dhlottery.co.kr/gameResult.do?method=byWin&drwNo={rnd}', timeout=15).text
+              soup = BeautifulSoup(html, 'lxml')
+              win_div = soup.find('div', class_='num win')
+              bonus_div = soup.find('div', class_='num bonus')
+              date_p = soup.find('p', class_='desc')
+              if not win_div: return None
+              nums = sorted([int(x.text) for x in win_div.find('p').find_all('span')])
+              bonus = int(bonus_div.find('p').text.strip())
+              date_str = date_p.text.strip() if date_p else ''
+              m = re.search(r'(\d{4})년.*?(\d{1,2})월.*?(\d{1,2})일', date_str)
+              date = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else ''
+              tbl = soup.find('table', class_='tbl_data')
+              prize1, cnt = 0, 0
+              if tbl:
+                rows = tbl.find_all('tr')
+                for row in rows:
+                  tds = row.find_all('td')
+                  if tds and '1등' in tds[0].text:
+                    try: cnt = int(tds[2].text.strip().replace(',',''))
+                    except: pass
+                    try: prize1 = int(tds[3].text.strip().replace(',','').replace('원',''))
+                    except: pass
+                    break
+              return {'round':rnd,'date':date,'nums':nums,'bonus':bonus,'prize1':prize1,'prize1Cnt':cnt}
+            except Exception as e:
+              print(f'{rnd}회 오류: {e}')
+              return None
+
+          with open('lotto.json','r',encoding='utf-8') as f:
+            data = json.load(f)
+          latest_existing = max(d['round'] for d in data)
+          print(f'기존 최신: {latest_existing}회')
+
+          latest_round = None
+          for attempt in range(1, 31):
+            latest_round = get_latest_round()
+            if latest_round and latest_round > latest_existing:
+              print(f'새 회차 발견: {latest_round}회!')
+              break
+            print(f'시도 {attempt}/30 - 최신:{latest_round}, 1분 대기...')
+            if attempt < 30: time.sleep(60)
+
+          if not latest_round or latest_round <= latest_existing:
+            print('새 데이터 없음. 종료.')
+            exit(0)
+
+          new_rounds = []
+          for rnd in range(latest_existing+1, latest_round+1):
+            print(f'{rnd}회차 수집 중...')
+            result = fetch_round(rnd)
+            if result:
+              new_rounds.append(result)
+              print(f"✅ {rnd}회 {result['date']} {result['nums']} 보너스:{result['bonus']}")
+            else:
+              print(f'❌ {rnd}회 실패')
+            time.sleep(2)
+
+          if new_rounds:
+            data = new_rounds + data
+            with open('lotto.json','w',encoding='utf-8') as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f'✅ {len(new_rounds)}회차 추가 완료!')
+          else:
+            print('새 데이터 수집 실패.')
+          PYEOF
       - name: Commit and push
         run: |
           git config user.name 'github-actions[bot]'
