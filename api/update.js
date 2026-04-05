@@ -6,7 +6,6 @@ const REPO = "lotto-proxy";
 
 async function fetchRound(rnd) {
   const url = `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${rnd}`;
-  console.log(`API 호출: ${url}`);
   const res = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -16,18 +15,11 @@ async function fetchRound(rnd) {
       "X-Requested-With": "XMLHttpRequest",
     },
   });
-  console.log(`응답 status: ${res.status}`);
   const text = await res.text();
-  console.log(`응답 앞 200자: ${text.substring(0, 200)}`);
-  if (!text.trim().startsWith("{")) {
-    console.log("JSON 아님 - 차단됨");
-    return null;
-  }
+  console.log(`${rnd}회 응답: ${text.substring(0, 100)}`);
+  if (!text.trim().startsWith("{")) return null;
   const data = JSON.parse(text);
-  if (data.returnValue !== "success") {
-    console.log(`returnValue: ${data.returnValue}`);
-    return null;
-  }
+  if (data.returnValue !== "success") return null;
   return {
     round: data.drwNo,
     date: data.drwNoDate,
@@ -38,24 +30,15 @@ async function fetchRound(rnd) {
   };
 }
 
-async function getLatestRound() {
-  const url = "https://www.dhlottery.co.kr/common.do?method=main";
-  console.log(`메인 호출: ${url}`);
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept-Language": "ko-KR,ko;q=0.9",
-    },
-  });
-  console.log(`메인 status: ${res.status}`);
-  const html = await res.text();
-  console.log(`메인 앞 500자: ${html.substring(0, 500)}`);
-  const m = html.match(/<strong id="lottoDrwNo">(\d+)<\/strong>/);
-  if (m) {
-    console.log(`최신 회차: ${m[1]}`);
-    return parseInt(m[1]);
+async function getLatestRound(latestExisting) {
+  // 방법1: 기존 최신+1부터 순서대로 시도해서 실패하면 그 전이 최신
+  console.log(`최신 회차 확인: ${latestExisting + 1}회 시도`);
+  const result = await fetchRound(latestExisting + 1);
+  if (result) {
+    console.log(`${latestExisting + 1}회 존재!`);
+    return latestExisting + 1;
   }
-  console.log("회차 파싱 실패");
+  console.log(`${latestExisting + 1}회 없음`);
   return null;
 }
 
@@ -70,23 +53,21 @@ export default async function handler(req, res) {
     const latestExisting = Math.max(...existing.map((d) => d.round));
     console.log(`기존 최신: ${latestExisting}회`);
 
-    const latestRound = await getLatestRound();
-    if (!latestRound || latestRound <= latestExisting) {
-      return res.json({ message: "새 데이터 없음", latestRound, latestExisting });
-    }
-
+    // 최신+1 회차 직접 시도
     const newRounds = [];
-    for (let rnd = latestExisting + 1; rnd <= latestRound; rnd++) {
+    for (let rnd = latestExisting + 1; rnd <= latestExisting + 5; rnd++) {
       const result = await fetchRound(rnd);
-      if (result) {
-        newRounds.push(result);
-        console.log(`✅ ${rnd}회 추가`);
+      if (!result) {
+        console.log(`${rnd}회 없음 - 종료`);
+        break;
       }
+      newRounds.push(result);
+      console.log(`✅ ${rnd}회 ${result.date} ${result.nums}`);
       await new Promise((r) => setTimeout(r, 1000));
     }
 
     if (newRounds.length === 0) {
-      return res.json({ message: "수집 실패", latestRound });
+      return res.json({ message: "새 회차 없음", latestExisting });
     }
 
     const allData = [...newRounds, ...existing];
